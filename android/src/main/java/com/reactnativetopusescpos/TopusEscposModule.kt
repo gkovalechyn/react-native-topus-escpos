@@ -1,169 +1,298 @@
 package com.reactnativetopusescpos
 
+import android.Manifest
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context), ActivityEventListener {
-  init {
-    context.addActivityEventListener(this);
-  }
+	init {
+		context.addActivityEventListener(this);
+	}
 
-  companion object {
-    const val REQUEST_ENABLE_BT: Int = 1;
-    const val TAG = "TPESCPOS";
-  }
+	companion object {
+		const val REQUEST_ENABLE_BT: Int = 1;
+		const val REQUEST_FIND_BT_DEVICES: Int = 2;
+		const val REQUEST_FINE_LOC_PERMISSION: Int = 3;
+		const val TAG = "TPESCPOS";
+	}
 
-  private var bluetoothAdapter: BluetoothAdapter? = null;
-  private val requestMap = HashMap<Int, Promise>();
+	private var bluetoothAdapter: BluetoothAdapter? = null;
+	private val requestMap = HashMap<Int, Promise>();
+	private val connection: ESCPOSConnection? = null;
 
-  override fun getName(): String {
-    return "TopusEscpos"
-  }
+	// Bluetooth device discovery fields
+	private var isDiscoveringDevices = false;
+	private var discoveryCancelJob: Job? = null;
+	private val discoveredDevices = ArrayList<BluetoothDevice>();
+	private val discoveryReceiver = object : BroadcastReceiver() {
+		override fun onReceive(context: Context?, intent: Intent?) {
+			if (intent == null) {
+				return;
+			}
 
-  private fun getAdapter(): BluetoothAdapter? {
-    if (this.bluetoothAdapter == null) {
-      this.bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-    }
+			Log.d(TAG, "Intent action: ${intent.action}")
 
-    return this.bluetoothAdapter;
-  }
+			if (intent.action == BluetoothDevice.ACTION_FOUND) {
+				discoveredDevices.add(intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE));
+			}
+		}
+	}
+
+	override fun getName(): String {
+		return "TopusEscpos"
+	}
+
+	private fun getAdapter(): BluetoothAdapter? {
+		if (this.bluetoothAdapter == null) {
+			this.bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+		}
+
+		return this.bluetoothAdapter;
+	}
+
+	@ReactMethod
+	fun isBluetoothSupported(promise: Promise) {
+		promise.resolve(this.getAdapter() != null);
+	}
+
+	@ReactMethod
+	fun isBluetoothEnabled(promise: Promise) {
+		val adapter = this.getAdapter();
+
+		if (adapter == null) {
+			promise.resolve(false);
+		}
+
+		promise.resolve(adapter!!.isEnabled);
+	}
+
+	@ReactMethod
+	fun findBluetoothDevices(promise: Promise) {
+		if (!this.assertBluetoothEnabled(promise)) {
+			return;
+		}
+
+		if (this.isDiscoveringDevices) {
+			return promise.reject(ErrorCode.ALREADY_DISCOVERING_BLUETOOTH_DEVICES.code, "Device discovery is already in progress");
+		}
+
+		// Is connected
+		if (this.connection != null && (this.connection.IsConnected || this.connection.IsReconnecting)) {
+			return promise.reject(ErrorCode.CANNOT_DISCOVER_WHILE_CONNECTED.code, "Cannot search for bluetooth devices while connected to one");
+		}
+
+		val hasPermission = ContextCompat.checkSelfPermission(this.reactApplicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+
+		if (!hasPermission) {
+			val adapter = this.getAdapter()!!;
+
+			this.discoveredDevices.clear();
+			this.isDiscoveringDevices = true;
+
+			val intentFilter = IntentFilter(BluetoothDevice.ACTION_FOUND);
+			this.reactApplicationContext.registerReceiver(this.discoveryReceiver, intentFilter);
+			this.requestMap[REQUEST_FIND_BT_DEVICES] = promise;
+
+			this.discoveryCancelJob = GlobalScope.launch {
+				delay(20000);
+				endBluetoothDeviceDiscovery();
+			}
+
+			adapter.startDiscovery();
+		} else {
+			ActivityCompat.requestPermissions(
+				this.reactApplicationContext.currentActivity!!,
+				Array(1) { Manifest.permission.ACCESS_FINE_LOCATION },
+				REQUEST_FINE_LOC_PERMISSION
+			);
+
+			val hasPermission = ContextCompat.checkSelfPermission(this.reactApplicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+
+			promise.reject(ErrorCode.PERMISSION_REQUIRED.code, "A permission is required for this functionality, a request was made to the user");
+		}
+	}
+
+	@ReactMethod
+	fun isFindingBluetoothDevices(promise: Promise) {
+		return promise.resolve(this.isDiscoveringDevices);
+	}
 
 
-  // Example method
-  // See https://facebook.github.io/react-native/docs/native-modules-android
-  @ReactMethod
-  fun multiply(a: Int, b: Int, promise: Promise) {
+	@ReactMethod
+	fun enableBluetooth(promise: Promise) {
+		if (!this.assertBluetoothSupported(promise)) {
+			return;
+		}
 
-    promise.resolve(a * b)
-  }
+		val adapter = this.getAdapter()!!;
 
-  @ReactMethod
-  fun isBluetoothSupported(promise: Promise) {
-    promise.resolve(this.getAdapter() != null);
-  }
+		if (adapter.isEnabled) {
+			return promise.resolve(true);
+		}
 
-  @ReactMethod
-  fun isBluetoothEnabled(promise: Promise) {
-    val adapter = this.getAdapter();
+		if (this.requestMap.containsKey(REQUEST_ENABLE_BT)) {
+			return promise.reject(ErrorCode.BLUETOOTH_ENABLE_REQ_IN_PROGRESS.code, "There is already a request to enable bluetooth in progress");
+		}
 
-    if (adapter == null) {
-      promise.resolve(false);
-    }
+		val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+		this.reactApplicationContext.startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT, Bundle.EMPTY);
 
-    promise.resolve(adapter!!.isEnabled);
-  }
+		this.requestMap[REQUEST_ENABLE_BT] = promise;
+	}
 
-  @ReactMethod
-  fun findDevices(promise: Promise) {
-    if (!this.assertBluetoothEnabled(promise)) {
-      return;
-    }
+	@ReactMethod
+	fun getBluetoothPairedDevices(promise: Promise) {
+		if (!this.assertBluetoothEnabled(promise)) {
+			return;
+		}
 
-    val adapter = this.getAdapter()!!;
-  }
+		val adapter = this.getAdapter()!!;
 
-  @ReactMethod
-  fun enableBluetooth(promise: Promise) {
-    if (!this.assertBluetoothSupported(promise)) {
-      return;
-    }
+		val pairedDevices = adapter.bondedDevices;
+		val responseArray = Arguments.createArray();
 
-    val adapter = this.getAdapter()!!;
+		pairedDevices.forEach { device ->
+			val jsonDevice = this.bluetoothDeviceToJson(device);
 
-    if (adapter.isEnabled) {
-      return promise.resolve(true);
-    }
+			responseArray.pushMap(jsonDevice);
+		};
 
-    if (this.requestMap.containsKey(REQUEST_ENABLE_BT)) {
-      return promise.reject(ErrorCode.BLUETOOTH_ENABLE_REQ_IN_PROGRESS.code, "There is already a request to enable bluetooth in progress");
-    }
+		promise.resolve(responseArray);
+	}
 
-    val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-    this.reactApplicationContext.startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT, Bundle.EMPTY);
+	@ReactMethod
+	fun isConnected(promise: Promise) {
+		if (this.connection == null) {
+			return promise.resolve(false);
+		}
 
-    this.requestMap[REQUEST_ENABLE_BT] = promise;
-  }
+		return promise.resolve(this.connection.IsConnected);
+	}
 
-  @ReactMethod
-  fun getPairedDevices(promise: Promise) {
-    if (!this.assertBluetoothEnabled(promise)) {
-      return;
-    }
+	@ReactMethod
+	fun isReconnecting(promise: Promise) {
+		if (this.connection == null) {
+			return promise.resolve(false);
+		}
 
-    val adapter = this.getAdapter()!!;
+		return promise.resolve(this.connection.IsReconnecting);
+	}
 
-    val pairedDevices = adapter.bondedDevices;
-    var responseArray = Arguments.createArray();
+	@ReactMethod
+	fun deviceSupportsAutoReconnection(promise: Promise) {
+		if (this.connection == null) {
+			return promise.resolve(false);
+		}
 
-    pairedDevices.forEach { device ->
-      val responseObj = Arguments.createMap();
-      responseObj.putString("name", device.name);
-      responseObj.putString("address", device.address);
-      // responseObj.putInt("type", device.type); Only in API version 18
-      responseObj.putInt("bondState", device.bondState);
+		return promise.resolve(this.connection.SupportsAutoReconnection);
+	}
 
-      val idList = Arguments.createArray();
-      device.uuids.forEach { id ->
-        idList.pushString(id.toString())
-      };
+	private fun endBluetoothDeviceDiscovery() {
+		val adapter = this.getAdapter()!!;
 
-      responseObj.putArray("ids", idList);
+		this.reactApplicationContext.unregisterReceiver(this.discoveryReceiver);
 
-      responseArray.pushMap(responseObj);
-    };
+		adapter.cancelDiscovery();
 
-    promise.resolve(responseArray);
-  }
+		this.isDiscoveringDevices = false;
+		this.discoveryCancelJob = null;
 
-  private fun assertBluetoothSupported(promise: Promise): Boolean {
-    if (this.getAdapter() == null) {
-      promise.reject(ErrorCode.BLUETOOTH_NOT_AVAILABLE.code, "Bluetooth is not available for this device");
-      return false;
-    }
+		val promise = this.requestMap[REQUEST_FIND_BT_DEVICES];
 
-    return true;
-  }
+		if (promise == null) {
+			Log.e(TAG, "Device discovery ended but there was no promise to return the response");
+			return;
+		}
 
-  private fun assertBluetoothEnabled(promise: Promise): Boolean {
-    if (this.assertBluetoothSupported(promise)) {
-      val adapter = this.getAdapter()!!;
+		val responseArray = Arguments.createArray();
 
-      if (!adapter.isEnabled) {
-        promise.reject(ErrorCode.BLUETOOTH_NOT_ENABLED.code, "Bluetooth is not enabled for this device");
-        return false;
-      }
+		this.discoveredDevices.forEach { device ->
+			responseArray.pushMap(this.bluetoothDeviceToJson(device));
+		};
 
-      return true;
-    }
+		promise.resolve(responseArray);
+	}
 
-    return false;
-  }
+	private fun bluetoothDeviceToJson(device: BluetoothDevice): WritableMap {
+		val responseObj = Arguments.createMap();
+		responseObj.putString("name", device.name);
+		responseObj.putString("address", device.address);
+		// responseObj.putInt("type", device.type); Only in API version 18
+		responseObj.putInt("bondState", device.bondState);
 
-  override fun onActivityResult(activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?) {
-    if (requestCode == REQUEST_ENABLE_BT) {
-      val promise = this.requestMap[requestCode];
+		val idList = Arguments.createArray();
 
-      if (promise == null) {
-        Log.e(TAG, "Received activity result for request code $REQUEST_ENABLE_BT but no promise was found to respond to");
-        return;
-      }
+		if (device.uuids != null) {
+			device.uuids.forEach { id ->
+				idList.pushString(id.toString())
+			};
+		}
 
-      if (resultCode == Activity.RESULT_OK) {
-        promise.resolve(null);
-      } else {
-        promise.reject(ErrorCode.USER_NOT_ENABLED_BLUETOOTH.code, "The user did not allow bluetooth to be enabled");
-      }
+		responseObj.putArray("ids", idList);
 
-      this.requestMap.remove(REQUEST_ENABLE_BT);
-    }
-  }
+		return responseObj;
+	}
 
-  override fun onNewIntent(intent: Intent?) {
-    // Don't care about this
-    // Not that I read the documentation to know what this does anyway
-  }
+	private fun assertBluetoothSupported(promise: Promise): Boolean {
+		if (this.getAdapter() == null) {
+			promise.reject(ErrorCode.BLUETOOTH_NOT_AVAILABLE.code, "Bluetooth is not available for this device");
+			return false;
+		}
+
+		return true;
+	}
+
+	private fun assertBluetoothEnabled(promise: Promise): Boolean {
+		if (this.assertBluetoothSupported(promise)) {
+			val adapter = this.getAdapter()!!;
+
+			if (!adapter.isEnabled) {
+				promise.reject(ErrorCode.BLUETOOTH_NOT_ENABLED.code, "Bluetooth is not enabled for this device");
+				return false;
+			}
+
+			return true;
+		}
+
+		return false;
+	}
+
+	override fun onActivityResult(activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?) {
+		if (requestCode == REQUEST_ENABLE_BT) {
+			val promise = this.requestMap[requestCode];
+
+			if (promise == null) {
+				Log.e(TAG, "Received activity result for request code $REQUEST_ENABLE_BT but no promise was found to respond to");
+				return;
+			}
+
+			if (resultCode == Activity.RESULT_OK) {
+				promise.resolve(null);
+			} else {
+				promise.reject(ErrorCode.USER_NOT_ENABLED_BLUETOOTH.code, "The user did not allow bluetooth to be enabled");
+			}
+
+			this.requestMap.remove(REQUEST_ENABLE_BT);
+		}
+	}
+
+	override fun onNewIntent(intent: Intent?) {
+		// Don't care about this
+		// Not that I read the documentation to know what this does anyway
+	}
 }

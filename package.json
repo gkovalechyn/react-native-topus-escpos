@@ -22,7 +22,7 @@
   "scripts": {
     "test": "jest",
     "typescript": "tsc --noEmit",
-    "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "lint": "eslint \"**/*.{js,jsx,ts,tsx}\"",
     "prepare": "bob build",
     "release": "release-it",
     "example": "yarn --cwd example",
@@ -105,25 +105,30 @@
         "error",
         {
           "quoteProps": "consistent",
-          "singleQuote": true,
-          "tabWidth": 2,
+          "singleQuote": false,
           "trailingComma": "es5",
-          "useTabs": false
+          "useTabs": true
         }
       ]
     }
   },
-  "eslintIgnore": ["node_modules/", "lib/"],
+  "eslintIgnore": [
+    "node_modules/",
+    "lib/"
+  ],
   "prettier": {
     "quoteProps": "consistent",
-    "singleQuote": true,
-    "tabWidth": 2,
+    "singleQuote": false,
     "trailingComma": "es5",
-    "useTabs": false
+    "useTabs": true
   },
   "@react-native-community/bob": {
     "source": "src",
     "output": "lib",
-    "targets": ["commonjs", "module", "typescript"]
+    "targets": [
+      "commonjs",
+      "module",
+      "typescript"
+    ]
   }
 }

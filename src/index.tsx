@@ -1,9 +1,29 @@
-import { NativeModules } from 'react-native';
+import { NativeModules } from "react-native";
 
-type TopusEscposType = {
-  multiply(a: number, b: number): Promise<number>;
+export type Device = {
+	name: string;
+	address: string;
+	bondState: number;
+
+	ids: Array<string>;
 };
 
-const { TopusEscpos } = NativeModules;
+type TopusEscposType = {
+	isBluetoothSupported(): Promise<boolean>;
 
-export default TopusEscpos as TopusEscposType;
+	isBluetoothEnabled(): Promise<boolean>;
+
+	findBluetoothDevices(): Promise<Device[]>;
+
+	enableBluetooth(): Promise<void>;
+
+	getBluetoothPairedDevices(): Promise<Device[]>;
+
+	isConnected(): Promise<boolean>;
+
+	isReconnecting(): Promise<boolean>;
+};
+
+const TopusEscpos = NativeModules.TopusEscpos as TopusEscposType;
+
+export { TopusEscpos };
