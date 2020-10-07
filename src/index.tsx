@@ -22,6 +22,22 @@ type TopusEscposType = {
 	isConnected(): Promise<boolean>;
 
 	isReconnecting(): Promise<boolean>;
+
+	deviceSupportsAutoReconnection(): Promise<boolean>;
+
+	connectToBluetoothDevice(address: string): Promise<void>;
+
+	disconnect(): Promise<void>;
+
+	writeLine(data: string): Promise<void>;
+
+	feed(amount: number): Promise<void>;
+
+	cut(): Promise<void>;
+
+	fancyText(data: string): Promise<void>;
+
+	barcode(data: string): Promise<void>;
 };
 
 const TopusEscpos = NativeModules.TopusEscpos as TopusEscposType;

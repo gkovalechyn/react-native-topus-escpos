@@ -14,10 +14,16 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
+import com.github.anastaciocintra.escpos.EscPos
+import com.github.anastaciocintra.escpos.Style
+import com.github.anastaciocintra.escpos.barcode.BarCode
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.IOException
+import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
 
 class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context), ActivityEventListener {
 	init {
@@ -33,7 +39,8 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 
 	private var bluetoothAdapter: BluetoothAdapter? = null;
 	private val requestMap = HashMap<Int, Promise>();
-	private val connection: ESCPOSConnection? = null;
+	private var connection: ESCPOSConnection? = null;
+	private var escpos: EscPos? = null;
 
 	// Bluetooth device discovery fields
 	private var isDiscoveringDevices = false;
@@ -92,7 +99,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 		}
 
 		// Is connected
-		if (this.connection != null && (this.connection.IsConnected || this.connection.IsReconnecting)) {
+		if (this.connection != null && (this.connection!!.IsConnected || this.connection!!.IsReconnecting)) {
 			return promise.reject(ErrorCode.CANNOT_DISCOVER_WHILE_CONNECTED.code, "Cannot search for bluetooth devices while connected to one");
 		}
 
@@ -120,8 +127,6 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 				Array(1) { Manifest.permission.ACCESS_FINE_LOCATION },
 				REQUEST_FINE_LOC_PERMISSION
 			);
-
-			val hasPermission = ContextCompat.checkSelfPermission(this.reactApplicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
 
 			promise.reject(ErrorCode.PERMISSION_REQUIRED.code, "A permission is required for this functionality, a request was made to the user");
 		}
@@ -181,7 +186,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 			return promise.resolve(false);
 		}
 
-		return promise.resolve(this.connection.IsConnected);
+		return promise.resolve(true);
 	}
 
 	@ReactMethod
@@ -190,7 +195,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 			return promise.resolve(false);
 		}
 
-		return promise.resolve(this.connection.IsReconnecting);
+		return promise.resolve(this.connection!!.IsReconnecting);
 	}
 
 	@ReactMethod
@@ -199,11 +204,163 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 			return promise.resolve(false);
 		}
 
-		return promise.resolve(this.connection.SupportsAutoReconnection);
+		return promise.resolve(this.connection!!.SupportsAutoReconnection);
+	}
+
+	@ReactMethod
+	fun connectToBluetoothDevice(address: String, promise: Promise) {
+		if (!this.assertBluetoothEnabled(promise)) {
+			return;
+		}
+
+		if (this.isDiscoveringDevices) {
+			this.endBluetoothDeviceDiscovery();
+		}
+
+		if (this.connection != null) {
+			this.connection!!.disconnect();
+
+			this.escpos = null;
+			this.connection = null;
+		}
+
+		val adapter = this.getAdapter()!!;
+		val pairedDevices = adapter.bondedDevices;
+
+		val device: BluetoothDevice? = pairedDevices.find { d -> d.address == address };
+
+		// If the device isn't paired, just throw an error and have the end application tell the user to pair to the device first
+		// @TODO Improve this so the pairing can be done here and not require the application/user to handle it
+		if (device == null) {
+			promise.reject(ErrorCode.DEVICE_NOT_PAIRED.code, "Device at address $address is not paired, pair with the device first to then connect to it.");
+			return;
+		}
+
+		this.connection = BluetoothConnection(device);
+
+		try {
+			this.connection!!.connect();
+			this.escpos = EscPos(this.connection!!.getOutputStream());
+
+			promise.resolve(null);
+		} catch (e: IOException) {
+			this.connection = null;
+			this.escpos = null;
+
+			promise.reject(e);
+		}
+	}
+
+	@ReactMethod
+	fun disconnect(promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		this.connection!!.disconnect();
+		this.connection = null;
+		this.escpos = null;
+
+		promise.resolve(null);
+	}
+
+	@ReactMethod
+	fun writeLine(data: String, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		var writeSucceeded = false;
+
+		try {
+			this.escpos!!.writeLF(data);
+			writeSucceeded = true;
+		} catch (e: IOException) {
+			Log.e(TAG, "TopusEscpos::writeLine - $e");
+			// Lost connection
+		}
+
+		// We're going to assume that failed writes mean a disconnection
+		if (!writeSucceeded) {
+			val connection = this.connection!!;
+			var reconnectionSucceeded = false;
+
+			while (connection.CanReconnect) {
+				try {
+					connection.attemptReconnect();
+					reconnectionSucceeded = true;
+					break;
+				} catch (e: IOException) {
+					Log.e(TAG, "TopusEscpos::writeLine reconnection - $e");
+					//
+				}
+			}
+
+			if (!reconnectionSucceeded) {
+				promise.reject(ErrorCode.CONNECTION_LOST.code, "Lost connection to device");
+				return;
+			}
+
+			this.escpos = EscPos(connection.getOutputStream());
+			// Successfully reconnected, attempt to write again. If this one fails, close the connection and don't attempt reconnects
+			try {
+				this.escpos!!.writeLF(data);
+			} catch (e: IOException) {
+				Log.e(TAG, "TopusEscpos::writeLine reconnection write - $e");
+				promise.reject(ErrorCode.CONNECTION_LOST.code, "Lost connection to device");
+				return;
+			}
+		}
+
+		promise.resolve(null);
+	}
+
+	@ReactMethod
+	fun feed(amount: Int, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		this.escpos!!.feed(amount);
+		promise.resolve(null);
+	}
+
+	@ReactMethod
+	fun cut(promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		this.escpos!!.cut(EscPos.CutMode.FULL);
+		promise.resolve(null);
+	}
+
+	@ReactMethod
+	fun fancyText(data: String, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		val style = Style().setBold(true).setUnderline(Style.Underline.TwoDotThick);
+
+		this.escpos!!.writeLF(style, data);
+		promise.resolve(null);
+	}
+
+	@ReactMethod
+	fun barcode(data: String, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		val barcode = BarCode();
+		this.escpos!!.write(barcode, data);
 	}
 
 	private fun endBluetoothDeviceDiscovery() {
 		val adapter = this.getAdapter()!!;
+
+		this.discoveryCancelJob!!.cancel();
 
 		this.reactApplicationContext.unregisterReceiver(this.discoveryReceiver);
 
@@ -270,6 +427,15 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 		}
 
 		return false;
+	}
+
+	private fun assertIsConnected(promise: Promise): Boolean {
+		if (this.connection == null) {
+			promise.reject(ErrorCode.NOT_CONNECTED.code, "Not connected to any ESCPOS device");
+			return false;
+		}
+
+		return true;
 	}
 
 	override fun onActivityResult(activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?) {

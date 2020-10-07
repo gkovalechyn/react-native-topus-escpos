@@ -1,17 +1,18 @@
 import * as React from "react";
-import { View, Text, Button } from "react-native";
+import { View, Text, Button, AppState } from "react-native";
 import { TopusEscpos, Device } from "react-native-topus-escpos";
 
-type AppState = {
+type State = {
 	devices: Device[];
 	isLoadingDevices: boolean;
+	selectedDevice?: Device;
 
 	isFindingDevices: boolean;
 	foundDevices: Device[];
 };
 
-export default class App extends React.Component<{}, AppState> {
-	readonly state: AppState = {
+export default class App extends React.Component<{}, State> {
+	readonly state: State = {
 		isLoadingDevices: false,
 		devices: [],
 
@@ -25,9 +26,14 @@ export default class App extends React.Component<{}, AppState> {
 				<Text>{this.state.isLoadingDevices ? "TRUE" : "FALSE"}</Text>
 				{this.state.devices.map((device) => {
 					return (
-						<Text key={device.address}>
-							{device.name} - {device.address}
-						</Text>
+						<Button
+							title={device.name}
+							key={device.address}
+							onPress={() => {
+								TopusEscpos.connectToBluetoothDevice(device.address);
+								this.setState({ selectedDevice: device });
+							}}
+						/>
 					);
 				})}
 
@@ -43,6 +49,29 @@ export default class App extends React.Component<{}, AppState> {
 				</Text>
 
 				<Button title="Discover" onPress={() => this.findDevices()} />
+
+				<Button
+					title="Test write"
+					onPress={async () => {
+						for (let i = 0; i < 3; i++) {
+							await TopusEscpos.fancyText("SOME DATA");
+							await TopusEscpos.writeLine("Normal text");
+						}
+
+						await TopusEscpos.feed(10);
+
+						await TopusEscpos.cut();
+
+						await TopusEscpos.feed(5);
+					}}
+				/>
+
+				<Button
+					title="Barcode"
+					onPress={async () => {
+						await TopusEscpos.barcode("Test barcode");
+					}}
+				/>
 			</View>
 		);
 	}
@@ -50,6 +79,20 @@ export default class App extends React.Component<{}, AppState> {
 	public componentDidMount() {
 		this.loadDevices();
 		this.findDevices();
+
+		console.log("COMPONENT MOUNTED");
+
+		AppState.addEventListener("change", (newState) => {
+			console.log("New app state changed to: " + newState);
+
+			if (newState === "active" && this.state.selectedDevice) {
+				TopusEscpos.connectToBluetoothDevice(this.state.selectedDevice.address);
+			}
+
+			if (newState === "inactive" || newState === "background") {
+				TopusEscpos.disconnect();
+			}
+		});
 	}
 
 	private async loadDevices() {
@@ -74,15 +117,20 @@ export default class App extends React.Component<{}, AppState> {
 			});
 	}
 
-	private findDevices() {
-		this.setState({ isFindingDevices: true });
-		TopusEscpos.findBluetoothDevices()
-			.then((devices) => {
-				console.log(devices);
-				this.setState({ foundDevices: devices });
-			})
-			.finally(() => {
-				this.setState({ isFindingDevices: false });
-			});
+	private async findDevices() {
+		const isConnected = await TopusEscpos.isConnected();
+
+		if (!isConnected) {
+			this.setState({ isFindingDevices: true });
+
+			TopusEscpos.findBluetoothDevices()
+				.then((devices) => {
+					console.log(devices);
+					this.setState({ foundDevices: devices });
+				})
+				.finally(() => {
+					this.setState({ isFindingDevices: false });
+				});
+		}
 	}
 }
