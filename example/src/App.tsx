@@ -1,6 +1,14 @@
 import * as React from "react";
 import { View, Text, Button, AppState } from "react-native";
-import { TopusEscpos, Device } from "react-native-topus-escpos";
+import { FontSize, FontName, BarcodeType, CharCode } from "../../src/index";
+import {
+	TopusEscpos,
+	Device,
+	BarcodeHRIPosition,
+	Justification,
+	BarcodeHRIFont,
+	Underline,
+} from "react-native-topus-escpos";
 
 type State = {
 	devices: Device[];
@@ -51,25 +59,53 @@ export default class App extends React.Component<{}, State> {
 				<Button title="Discover" onPress={() => this.findDevices()} />
 
 				<Button
+					title="Set character table"
+					onPress={() => {
+						TopusEscpos.setCharacterCodeTable(CharCode.KATAKANA);
+					}}
+				/>
+
+				<Button
 					title="Test write"
 					onPress={async () => {
-						for (let i = 0; i < 3; i++) {
-							await TopusEscpos.fancyText("SOME DATA");
-							await TopusEscpos.writeLine("Normal text");
-						}
+						await TopusEscpos.write("áéíóúçã", {});
+						await TopusEscpos.writeLine("Part 2", { isBold: true });
+						await TopusEscpos.write("Part 3", {
+							isBold: true,
+							underline: Underline.ONE_DOT_THICK,
+						});
+						await TopusEscpos.write("Part 4", {
+							isBold: true,
+							underline: Underline.TWO_DOT_THICK,
+							fontSize: { width: FontSize.SIZE_3, height: FontSize.SIZE_5 },
+						});
+						await TopusEscpos.write("Part 5", {
+							underline: Underline.TWO_DOT_THICK,
+							fontSize: { width: FontSize.SIZE_5, height: FontSize.SIZE_5 },
+						});
+						await TopusEscpos.writeLine("", {});
 
-						await TopusEscpos.feed(10);
-
-						await TopusEscpos.cut();
-
-						await TopusEscpos.feed(5);
+						await TopusEscpos.writeLine("FONT A", {
+							fontName: FontName.FONT_A,
+						});
+						await TopusEscpos.writeLine("FONT B", {
+							fontName: FontName.FONT_B,
+						});
+						await TopusEscpos.writeLine("FONT C", {
+							fontName: FontName.FONT_C,
+						});
 					}}
 				/>
 
 				<Button
 					title="Barcode"
 					onPress={async () => {
-						await TopusEscpos.barcode("Test barcode");
+						await TopusEscpos.barcode("{ABC123510283", {
+							type: BarcodeType.CODE128,
+							justification: Justification.CENTER,
+							hriFont: BarcodeHRIFont.FONT_B,
+							hriPosition: BarcodeHRIPosition.BELOW,
+						});
 					}}
 				/>
 			</View>

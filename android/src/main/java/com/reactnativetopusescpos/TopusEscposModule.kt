@@ -15,6 +15,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
 import com.github.anastaciocintra.escpos.EscPos
+import com.github.anastaciocintra.escpos.EscPosConst
 import com.github.anastaciocintra.escpos.Style
 import com.github.anastaciocintra.escpos.barcode.BarCode
 import kotlinx.coroutines.GlobalScope
@@ -22,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.lang.RuntimeException
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 
@@ -62,6 +64,16 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 
 	override fun getName(): String {
 		return "TopusEscpos"
+	}
+
+	override fun getConstants(): MutableMap<String, Any> {
+		val constants = HashMap<String, Any>();
+
+		ErrorCode.values().forEach { code ->
+			constants[code.name] = code.code;
+		}
+
+		return constants;
 	}
 
 	private fun getAdapter(): BluetoothAdapter? {
@@ -105,7 +117,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 
 		val hasPermission = ContextCompat.checkSelfPermission(this.reactApplicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
 
-		if (!hasPermission) {
+		if (hasPermission) {
 			val adapter = this.getAdapter()!!;
 
 			this.discoveredDevices.clear();
@@ -265,22 +277,44 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 	}
 
 	@ReactMethod
-	fun writeLine(data: String, promise: Promise) {
+	fun write(data: String, style: ReadableMap, promise: Promise) {
 		if (!this.assertIsConnected(promise)) {
 			return;
 		}
 
-		var writeSucceeded = false;
+		val escposStyle = this.jsonStyleToNativeStyle(style);
 
-		try {
-			this.escpos!!.writeLF(data);
-			writeSucceeded = true;
-		} catch (e: IOException) {
-			Log.e(TAG, "TopusEscpos::writeLine - $e");
-			// Lost connection
+		this.assertWrite({
+			this.escpos!!.write(escposStyle, data);
+		}, promise);
+	}
+
+	@ReactMethod
+	fun writeDefaultStyle(data: String, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
 		}
 
-		// We're going to assume that failed writes mean a disconnection
+
+		this.assertWrite({
+			this.escpos!!.write(data);
+		}, promise);
+	}
+
+	@ReactMethod
+	fun writeLine(data: String, style: ReadableMap, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		val escposStyle = this.jsonStyleToNativeStyle(style);
+
+		this.assertWrite({
+			this.escpos!!.writeLF(escposStyle, data);
+		}, promise);
+
+
+		/* TODO Handle disconnections
 		if (!writeSucceeded) {
 			val connection = this.connection!!;
 			var reconnectionSucceeded = false;
@@ -311,50 +345,105 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 				return;
 			}
 		}
-
-		promise.resolve(null);
+		*/
 	}
 
 	@ReactMethod
-	fun feed(amount: Int, promise: Promise) {
+	fun writeLineDefaultStyle(data: String, promise: Promise) {
 		if (!this.assertIsConnected(promise)) {
 			return;
 		}
 
-		this.escpos!!.feed(amount);
-		promise.resolve(null);
+		this.assertWrite({
+			this.escpos!!.writeLF(data);
+		}, promise);
 	}
 
 	@ReactMethod
-	fun cut(promise: Promise) {
+	fun setDefaultStyle(obj: ReadableMap, promise: Promise) {
 		if (!this.assertIsConnected(promise)) {
 			return;
 		}
 
-		this.escpos!!.cut(EscPos.CutMode.FULL);
-		promise.resolve(null);
+		val style = this.jsonStyleToNativeStyle(obj);
+
+		this.assertWrite({
+			this.escpos!!.setStyle(style)
+		}, promise);
 	}
 
 	@ReactMethod
-	fun fancyText(data: String, promise: Promise) {
+	fun setCharacterCodeTable(code: Int, promise: Promise) {
 		if (!this.assertIsConnected(promise)) {
 			return;
 		}
 
-		val style = Style().setBold(true).setUnderline(Style.Underline.TwoDotThick);
+		val enum = EscPos.CharacterCodeTable.values().find { e -> e.value == code }
+			?: throw RuntimeException("Invalude EscPos::CharacterCodeTable value: $code");
 
-		this.escpos!!.writeLF(style, data);
-		promise.resolve(null);
+		this.assertWrite({
+			this.escpos!!.setCharacterCodeTable(enum);
+		}, promise);
 	}
 
 	@ReactMethod
-	fun barcode(data: String, promise: Promise) {
+	fun setPrinterCodePage(code: Int, promise: Promise) {
 		if (!this.assertIsConnected(promise)) {
 			return;
 		}
 
-		val barcode = BarCode();
-		this.escpos!!.write(barcode, data);
+		if (code > 255 || code < 0) {
+			promise.reject(ErrorCode.INVALID_CODE_PAGE.code, "The code page must be between 0 to 255");
+			return;
+		}
+
+		this.assertWrite({ this.escpos!!.setPrinterCharacterTable(code); }, promise);
+	}
+
+	@ReactMethod
+	fun setStringEncoding(encoding: String, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		this.assertWrite({
+			this.escpos!!.setCharsetName(encoding)
+		}, promise);
+	}
+
+
+	@ReactMethod
+	fun feed(lineCount: Int, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+		this.assertWrite(
+			{ this.escpos!!.feed(lineCount); },
+			promise
+		);
+
+	}
+
+	@ReactMethod
+	fun cut(mode: Int, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		val enumValue = EscPos.CutMode.values().find { e -> e.value == mode }
+			?: throw RuntimeException("Invalid EscPos::CutMode value: $mode");
+
+		this.assertWrite({ this.escpos!!.cut(enumValue); }, promise);
+	}
+
+	@ReactMethod
+	fun barcode(data: String, map: ReadableMap, promise: Promise) {
+		if (!this.assertIsConnected(promise)) {
+			return;
+		}
+
+		val barcode = this.barcodeOptionsToBarcode(map);
+		this.assertWrite({ this.escpos!!.write(barcode, data); }, promise);
 	}
 
 	private fun endBluetoothDeviceDiscovery() {
@@ -383,6 +472,128 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 		};
 
 		promise.resolve(responseArray);
+	}
+
+	private fun jsonStyleToNativeStyle(json: ReadableMap): Style {
+		val style = Style();
+
+		if (json.hasKey("isBold")) {
+			style.setBold(json.getBoolean("isBold"));
+		}
+
+		if (json.hasKey("colorMode")) {
+			val colorModeValue = json.getInt("colorMode");
+			val enumValue = Style.ColorMode.values().find { e -> e.value == colorModeValue }
+				?: throw RuntimeException("Invalid Style::ColorMode value: $colorModeValue");
+
+			style.setColorMode(enumValue);
+		}
+
+		if (json.hasKey("fontName")) {
+			val fontNameValue = json.getInt("fontName");
+			val enumValue = Style.FontName.values().find { e -> e.value == fontNameValue }
+				?: throw RuntimeException("Invalid Style::FontName value: $fontNameValue");
+
+			style.setFontName(enumValue);
+		}
+
+		if (json.hasKey("fontSize")) {
+			val obj = json.getMap("fontSize")!!;
+
+			var width = Style.FontSize._1;
+			var height = Style.FontSize._1;
+
+			if (obj.hasKey("width")) {
+				val value = obj.getInt("width");
+				width = Style.FontSize.values().find { e -> e.value == value }
+					?: throw RuntimeException("Invalid Style::FontSize::width value: $value");
+			}
+
+			if (obj.hasKey("height")) {
+				val value = obj.getInt("height");
+				height = Style.FontSize.values().find { e -> e.value == value }
+					?: throw RuntimeException("Invalid Style::FontSize::height value: $value");
+			}
+
+			style.setFontSize(width, height);
+		}
+
+		if (json.hasKey("justification")) {
+			val value = json.getInt("justification");
+			val enumValue = EscPosConst.Justification.values().find { e -> e.value == value }
+				?: throw RuntimeException("Invalid EscPosConst::Justification value: $value");
+
+			style.setJustification(enumValue);
+		}
+
+		if (json.hasKey("underline")) {
+			val value = json.getInt("underline");
+			val enumValue = Style.Underline.values().find { e -> e.value == value }
+				?: throw RuntimeException("Invalid Style::Underline value: $value");
+
+			style.setUnderline(enumValue);
+		}
+
+		if (json.hasKey("lineSpacing")) {
+			style.setLineSpacing(json.getInt("lineSpacing"));
+		}
+
+		return style;
+	}
+
+	private fun barcodeOptionsToBarcode(json: ReadableMap): BarCode {
+		val barcode = BarCode();
+
+		if (json.hasKey("type")) {
+			val value = json.getInt("type");
+			val enumValue = BarCode.BarCodeSystem.values().find { e -> e.code == value }
+				?: throw RuntimeException("Invalid Barcode::BarCodeSystem value: $value");
+
+			barcode.setSystem(enumValue);
+		}
+
+		if (json.hasKey("hriPosition")) {
+			val value = json.getInt("hriPosition");
+			val enumValue = BarCode.BarCodeHRIPosition.values().find { e -> e.value == value }
+				?: throw RuntimeException("Invalid Barcode::HRIPosition value: $value");
+
+			barcode.setHRIPosition(enumValue);
+		}
+
+		if (json.hasKey("hriFont")) {
+			val value = json.getInt("hriFont");
+			val enumValue = BarCode.BarCodeHRIFont.values().find { e -> e.value == value }
+				?: throw RuntimeException("Invalid Barcode::BarCodeHRIFont value: $value");
+
+			barcode.setHRIFont(enumValue);
+		}
+
+		if (json.hasKey("justification")) {
+			val value = json.getInt("justification");
+			val enumValue = EscPosConst.Justification.values().find { e -> e.value == value }
+				?: throw RuntimeException("Invalid EscPosConst::Justification value: $value");
+
+			barcode.setJustification(enumValue);
+		}
+
+		return barcode;
+	}
+
+	private fun assertWrite(func: () -> Any, promise: Promise) {
+		try {
+			func.invoke();
+			promise.resolve(null);
+		} catch (e: IOException) {
+			// We're going to assume that failed writes mean a disconnection
+			this.connection!!.disconnect();
+			this.connection = null;
+			this.escpos = null;
+
+			Log.e(TAG, "TopusEscpos::writeLine - $e");
+
+			promise.reject(ErrorCode.CONNECTION_LOST.code, "Lost connection to the device");
+			return;
+		}
 	}
 
 	private fun bluetoothDeviceToJson(device: BluetoothDevice): WritableMap {
