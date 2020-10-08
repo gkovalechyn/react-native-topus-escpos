@@ -3,7 +3,7 @@ import { View, Text, Button, AppState } from "react-native";
 import { FontSize, FontName, BarcodeType, CharCode } from "../../src/index";
 import {
 	TopusEscpos,
-	Device,
+	BluetoothDevice,
 	BarcodeHRIPosition,
 	Justification,
 	BarcodeHRIFont,
@@ -11,12 +11,12 @@ import {
 } from "react-native-topus-escpos";
 
 type State = {
-	devices: Device[];
+	devices: BluetoothDevice[];
 	isLoadingDevices: boolean;
-	selectedDevice?: Device;
+	selectedDevice?: BluetoothDevice;
 
 	isFindingDevices: boolean;
-	foundDevices: Device[];
+	foundDevices: BluetoothDevice[];
 };
 
 export default class App extends React.Component<{}, State> {

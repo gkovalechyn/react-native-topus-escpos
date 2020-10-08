@@ -1,6 +1,6 @@
 import { NativeModules } from "react-native";
 
-export type Device = {
+export type BluetoothDevice = {
 	name: string;
 	address: string;
 	bondState: number;
@@ -152,11 +152,11 @@ type TopusEscposType = {
 
 	isBluetoothEnabled(): Promise<boolean>;
 
-	findBluetoothDevices(): Promise<Device[]>;
+	findBluetoothDevices(): Promise<BluetoothDevice[]>;
 
 	enableBluetooth(): Promise<void>;
 
-	getBluetoothPairedDevices(): Promise<Device[]>;
+	getBluetoothPairedDevices(): Promise<BluetoothDevice[]>;
 
 	isConnected(): Promise<boolean>;
 
