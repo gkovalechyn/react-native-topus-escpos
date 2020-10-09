@@ -1,6 +1,13 @@
 import * as React from "react";
-import { View, Text, Button, AppState } from "react-native";
-import { FontSize, FontName, BarcodeType, CharCode } from "../../src/index";
+import {
+	View,
+	Text,
+	Button,
+	AppState,
+	NativeEventEmitter,
+	NativeModules,
+	EventSubscription,
+} from "react-native";
 import {
 	TopusEscpos,
 	BluetoothDevice,
@@ -8,6 +15,11 @@ import {
 	Justification,
 	BarcodeHRIFont,
 	Underline,
+	FontSize,
+	FontName,
+	BarcodeType,
+	CharCode,
+	ColorMode,
 } from "react-native-topus-escpos";
 
 type State = {
@@ -92,7 +104,7 @@ export default class App extends React.Component<{}, State> {
 							fontName: FontName.FONT_B,
 						});
 						await TopusEscpos.writeLine("FONT C", {
-							fontName: FontName.FONT_C,
+							colorMode: ColorMode.WHITE_ON_BLACK,
 						});
 					}}
 				/>
@@ -112,6 +124,9 @@ export default class App extends React.Component<{}, State> {
 		);
 	}
 
+	private connectedEventListener?: EventSubscription;
+	private disconnectedEventListener?: EventSubscription;
+
 	public componentDidMount() {
 		this.loadDevices();
 		this.findDevices();
@@ -129,6 +144,25 @@ export default class App extends React.Component<{}, State> {
 				TopusEscpos.disconnect();
 			}
 		});
+
+		const eventEmitter = new NativeEventEmitter(NativeModules.TopusEscpos);
+		this.connectedEventListener = eventEmitter.addListener(
+			TopusEscpos.EVENT_CONNECTED,
+			this.onConnected.bind(this)
+		);
+
+		this.disconnectedEventListener = eventEmitter.addListener(
+			TopusEscpos.EVENT_DISCONNECTED,
+			this.onDisconnected.bind(this)
+		);
+	}
+
+	private onConnected() {
+		console.log("Connected");
+	}
+
+	private onDisconnected() {
+		console.log("Disconnected");
 	}
 
 	private async loadDevices() {
@@ -167,6 +201,16 @@ export default class App extends React.Component<{}, State> {
 				.finally(() => {
 					this.setState({ isFindingDevices: false });
 				});
+		}
+	}
+
+	public componentWillUnmount() {
+		if (this.connectedEventListener) {
+			this.connectedEventListener.remove();
+		}
+
+		if (this.disconnectedEventListener) {
+			this.disconnectedEventListener.remove();
 		}
 	}
 }

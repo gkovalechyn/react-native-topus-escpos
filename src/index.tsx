@@ -211,6 +211,10 @@ type TopusEscposType = {
 	NOT_CONNECTED: string;
 	CONNECTION_LOST: string;
 	INVALID_CODE_PAGE: string;
+
+	// Event codes
+	EVENT_CONNECTED: string;
+	EVENT_DISCONNECTED: string;
 };
 
 const TopusEscpos = NativeModules.TopusEscpos as TopusEscposType;

@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
+import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter
 import com.github.anastaciocintra.escpos.EscPos
 import com.github.anastaciocintra.escpos.EscPosConst
 import com.github.anastaciocintra.escpos.Style
@@ -23,9 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.IOException
-import java.lang.RuntimeException
-import kotlin.collections.ArrayList
-import kotlin.collections.HashMap
+
 
 class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context), ActivityEventListener {
 	init {
@@ -71,6 +70,10 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 
 		ErrorCode.values().forEach { code ->
 			constants[code.name] = code.code;
+		}
+
+		Event.values().forEach { event ->
+			constants["EVENT_${event.name}"] = event.code;
 		}
 
 		return constants;
@@ -231,9 +234,10 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 
 		if (this.connection != null) {
 			this.connection!!.disconnect();
-
 			this.escpos = null;
 			this.connection = null;
+
+			this.sendEvent(Event.DISCONNECTED, null);
 		}
 
 		val adapter = this.getAdapter()!!;
@@ -255,6 +259,10 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 			this.escpos = EscPos(this.connection!!.getOutputStream());
 
 			promise.resolve(null);
+
+			val jsonDevice = this.bluetoothDeviceToJson(device);
+
+			this.sendEvent(Event.CONNECTED, jsonDevice);
 		} catch (e: IOException) {
 			this.connection = null;
 			this.escpos = null;
@@ -592,8 +600,14 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 			Log.e(TAG, "TopusEscpos::writeLine - $e");
 
 			promise.reject(ErrorCode.CONNECTION_LOST.code, "Lost connection to the device");
+
+			this.sendEvent(Event.DISCONNECTED, null);
 			return;
 		}
+	}
+
+	private fun sendEvent(event: Event, obj: ReadableMap?) {
+		this.reactApplicationContext.getJSModule(RCTDeviceEventEmitter::class.java).emit(event.code, obj);
 	}
 
 	private fun bluetoothDeviceToJson(device: BluetoothDevice): WritableMap {
