@@ -12,5 +12,6 @@ public enum class ErrorCode(val code: String) {
 	DEVICE_NOT_PAIRED("device-not-paired"),
 	NOT_CONNECTED("not-connected"),
 	CONNECTION_LOST("connection-lost"),
-	INVALID_CODE_PAGE("invalid-code-page")
+	INVALID_CODE_PAGE("invalid-code-page"),
+	CONNECTION_ATTEMPT_IN_PROGRESS("connection-attempt-in-progress")
 }

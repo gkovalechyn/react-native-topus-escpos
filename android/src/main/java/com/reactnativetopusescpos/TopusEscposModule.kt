@@ -35,6 +35,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 		const val REQUEST_ENABLE_BT: Int = 1;
 		const val REQUEST_FIND_BT_DEVICES: Int = 2;
 		const val REQUEST_FINE_LOC_PERMISSION: Int = 3;
+		const val REQUEST_CONNECTION: Int = 4;
 		const val TAG = "TPESCPOS";
 	}
 
@@ -42,6 +43,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 	private val requestMap = HashMap<Int, Promise>();
 	private var connection: ESCPOSConnection? = null;
 	private var escpos: EscPos? = null;
+	private var connectionJob: Job? = null;
 
 	// Bluetooth device discovery fields
 	private var isDiscoveringDevices = false;
@@ -223,6 +225,11 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 	}
 
 	@ReactMethod
+	fun isConnecting(promise: Promise) {
+		promise.resolve(this.requestMap.containsKey(REQUEST_CONNECTION));
+	}
+
+	@ReactMethod
 	fun connectToBluetoothDevice(address: String, promise: Promise) {
 		if (!this.assertBluetoothEnabled(promise)) {
 			return;
@@ -230,6 +237,11 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 
 		if (this.isDiscoveringDevices) {
 			this.endBluetoothDeviceDiscovery();
+		}
+
+		if (this.requestMap.containsKey(REQUEST_CONNECTION)) {
+			promise.reject(ErrorCode.CONNECTION_ATTEMPT_IN_PROGRESS.code, "There already is a connection attempt in progress");
+			return;
 		}
 
 		if (this.connection != null) {
@@ -252,22 +264,26 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 			return;
 		}
 
-		this.connection = BluetoothConnection(device);
+		requestMap[REQUEST_CONNECTION] = promise;
 
-		try {
-			this.connection!!.connect();
-			this.escpos = EscPos(this.connection!!.getOutputStream());
+		this.connectionJob = GlobalScope.launch {
+			val tempConnection = BluetoothConnection(device);
 
-			promise.resolve(null);
+			try {
+				tempConnection.connect();
+				connection = tempConnection;
+				escpos = EscPos(tempConnection.getOutputStream());
 
-			val jsonDevice = this.bluetoothDeviceToJson(device);
+				promise.resolve(null);
 
-			this.sendEvent(Event.CONNECTED, jsonDevice);
-		} catch (e: IOException) {
-			this.connection = null;
-			this.escpos = null;
+				val jsonDevice = bluetoothDeviceToJson(device);
 
-			promise.reject(e);
+				sendEvent(Event.CONNECTED, jsonDevice);
+			} catch (e: IOException) {
+				promise.reject(e);
+			} finally {
+				requestMap.remove(REQUEST_CONNECTION);
+			}
 		}
 	}
 
@@ -590,6 +606,9 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 	private fun assertWrite(func: () -> Any, promise: Promise) {
 		try {
 			func.invoke();
+
+			// escpos!!.flush();
+			
 			promise.resolve(null);
 		} catch (e: IOException) {
 			// We're going to assume that failed writes mean a disconnection

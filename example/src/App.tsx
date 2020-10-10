@@ -27,6 +27,9 @@ type State = {
 	isLoadingDevices: boolean;
 	selectedDevice?: BluetoothDevice;
 
+	isConnecting: boolean;
+	writeState: string;
+
 	isFindingDevices: boolean;
 	foundDevices: BluetoothDevice[];
 };
@@ -36,7 +39,10 @@ export default class App extends React.Component<{}, State> {
 		isLoadingDevices: false,
 		devices: [],
 
+		writeState: "",
+
 		isFindingDevices: false,
+		isConnecting: false,
 		foundDevices: [],
 	};
 
@@ -50,23 +56,33 @@ export default class App extends React.Component<{}, State> {
 							title={device.name}
 							key={device.address}
 							onPress={() => {
-								TopusEscpos.connectToBluetoothDevice(device.address);
+								this.setState({ isConnecting: true });
+								TopusEscpos.connectToBluetoothDevice(device.address).finally(
+									() => {
+										this.setState({ isConnecting: false });
+									}
+								);
 								this.setState({ selectedDevice: device });
 							}}
 						/>
 					);
 				})}
 
+				<Text>Connecting? {this.state.isConnecting ? "true" : "false"}</Text>
+
 				<Text>
 					Finding devices? {this.state.isFindingDevices ? "true" : "false"}
-					{this.state.foundDevices.map((device) => {
-						return (
-							<Text key={device.address}>
-								{device.name} - {device.address}
-							</Text>
-						);
-					})}
 				</Text>
+
+				<Text>Write state: {this.state.writeState}</Text>
+
+				{this.state.foundDevices.map((device) => {
+					return (
+						<Text key={device.address}>
+							{device.name} - {device.address}
+						</Text>
+					);
+				})}
 
 				<Button title="Discover" onPress={() => this.findDevices()} />
 
@@ -80,32 +96,59 @@ export default class App extends React.Component<{}, State> {
 				<Button
 					title="Test write"
 					onPress={async () => {
+						this.setState({ writeState: "Before" });
+
 						await TopusEscpos.write("áéíóúçã", {});
+
+						this.setState({ writeState: "After first" });
+
 						await TopusEscpos.writeLine("Part 2", { isBold: true });
+
+						this.setState({ writeState: "After second" });
+
 						await TopusEscpos.write("Part 3", {
 							isBold: true,
 							underline: Underline.ONE_DOT_THICK,
 						});
+
+						this.setState({ writeState: "After third" });
+
 						await TopusEscpos.write("Part 4", {
 							isBold: true,
 							underline: Underline.TWO_DOT_THICK,
 							fontSize: { width: FontSize.SIZE_3, height: FontSize.SIZE_5 },
 						});
+
+						this.setState({ writeState: "After fourth" });
+
 						await TopusEscpos.write("Part 5", {
 							underline: Underline.TWO_DOT_THICK,
 							fontSize: { width: FontSize.SIZE_5, height: FontSize.SIZE_5 },
 						});
-						await TopusEscpos.writeLine("", {});
+
+						this.setState({ writeState: "After fifth" });
+
+						await TopusEscpos.feed(1);
+
+						this.setState({ writeState: "After feed" });
 
 						await TopusEscpos.writeLine("FONT A", {
 							fontName: FontName.FONT_A,
 						});
+
+						this.setState({ writeState: "After font a" });
+
 						await TopusEscpos.writeLine("FONT B", {
 							fontName: FontName.FONT_B,
 						});
+
+						this.setState({ writeState: "After font b" });
+
 						await TopusEscpos.writeLine("FONT C", {
 							colorMode: ColorMode.WHITE_ON_BLACK,
 						});
+
+						this.setState({ writeState: "After font c" });
 					}}
 				/>
 
@@ -118,6 +161,17 @@ export default class App extends React.Component<{}, State> {
 							hriFont: BarcodeHRIFont.FONT_B,
 							hriPosition: BarcodeHRIPosition.BELOW,
 						});
+					}}
+				/>
+
+				<Button
+					title="Log something"
+					onPress={async () => {
+						console.log("AAAAAAA");
+						console.log("AAAAAAA");
+						console.log("AAAAAAA");
+						console.log("AAAAAAA");
+						console.log("AAAAAAA");
 					}}
 				/>
 			</View>

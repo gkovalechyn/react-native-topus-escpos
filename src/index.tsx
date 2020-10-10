@@ -160,6 +160,8 @@ type TopusEscposType = {
 
 	isConnected(): Promise<boolean>;
 
+	isConnecting(): Promise<boolean>;
+
 	isReconnecting(): Promise<boolean>;
 
 	deviceSupportsAutoReconnection(): Promise<boolean>;
