@@ -1,6 +1,6 @@
 {
   "name": "react-native-topus-escpos",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Android bluetooth escpos module using escpos-coffee",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
