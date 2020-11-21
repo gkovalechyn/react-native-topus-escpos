@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.lang.Exception
 
 
 class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context), ActivityEventListener {
@@ -40,6 +41,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 	}
 
 	private var bluetoothAdapter: BluetoothAdapter? = null;
+	private val usbService = USBService(context);
 	private val requestMap = HashMap<Int, Promise>();
 	private var connection: ESCPOSConnection? = null;
 	private var escpos: EscPos? = null;
@@ -470,6 +472,67 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 		this.assertWrite({ this.escpos!!.write(barcode, data); }, promise);
 	}
 
+	@ReactMethod
+	fun getUSBDevices(promise: Promise) {
+		val responseArray = Arguments.createArray();
+
+		val devices = this.usbService.getDevices();
+
+		devices.forEach { entry ->
+			val device = entry.value;
+			val jsonObj = Arguments.createMap();
+
+			jsonObj.putString("name", device.deviceName);
+			jsonObj.putString("manufacturerName", device.manufacturerName);
+			jsonObj.putString("productName", device.productName);
+			jsonObj.putString("serialNumber", device.serialNumber);
+//			jsonObj.putString("", device.version); // API 23
+			jsonObj.putInt("id", device.deviceId);
+			jsonObj.putInt("protocolId", device.deviceProtocol);
+			jsonObj.putInt("subclassId", device.deviceSubclass);
+			jsonObj.putInt("interfaceCount", device.interfaceCount);
+			jsonObj.putInt("productId", device.productId);
+			jsonObj.putInt("vendorId", device.vendorId);
+
+			responseArray.pushMap(jsonObj);
+		}
+
+		promise.resolve(responseArray);
+	}
+
+	@ReactMethod
+	fun connectToUSBDevice(vendorId: Int, productId: Int, promise: Promise) {
+		val devices = this.usbService.getDevices();
+		val foundDevice = devices.values.find { d -> d.vendorId == vendorId && d.productId == productId };
+
+		if (foundDevice == null) {
+			promise.reject(ErrorCode.DEVICE_NOT_FOUND.code, "Device with vendorId=$vendorId, productId=$productId not found");
+			return;
+		}
+
+		if (this.connection != null) {
+			this.connection!!.disconnect();
+		}
+
+		this.usbService.requestPermissionToConnect(foundDevice) { device, result ->
+			if (!result) {
+				promise.reject(ErrorCode.PERMISSION_DENIED.code, "The user did not allow to connect to the device")
+			} else {
+				this.connection = this.usbService.connectToDevice(device);
+
+				try {
+					this.connection!!.connect();
+					this.escpos = EscPos(this.connection!!.getOutputStream());
+					promise.resolve(null);
+				} catch (e: Exception) {
+					this.connection = null;
+					this.escpos = null;
+					promise.reject(e);
+				}
+			}
+		};
+	}
+
 	private fun endBluetoothDeviceDiscovery() {
 		val adapter = this.getAdapter()!!;
 
@@ -608,7 +671,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 			func.invoke();
 
 			// escpos!!.flush();
-			
+
 			promise.resolve(null);
 		} catch (e: IOException) {
 			// We're going to assume that failed writes mean a disconnection
@@ -633,7 +696,7 @@ class TopusEscposModule(context: ReactApplicationContext) : ReactContextBaseJava
 		val responseObj = Arguments.createMap();
 		responseObj.putString("name", device.name);
 		responseObj.putString("address", device.address);
-		// responseObj.putInt("type", device.type); Only in API version 18
+		responseObj.putInt("type", device.type);
 		responseObj.putInt("bondState", device.bondState);
 
 		val idList = Arguments.createArray();

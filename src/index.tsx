@@ -147,6 +147,20 @@ export enum CharCode {
 	USER_DEFINED_PAGE = 255,
 }
 
+export type USBDevice = {
+	name: string;
+	manufacturerName: string | null;
+	productName: string | null;
+	serialNumber: string | null;
+
+	id: number;
+	protocolId: number;
+	subclassId: number;
+	interfaceCount: number;
+	productId: number;
+	vendorId: number;
+};
+
 type TopusEscposType = {
 	isBluetoothSupported(): Promise<boolean>;
 
@@ -199,6 +213,10 @@ type TopusEscposType = {
 	cut(mode: CutMode): Promise<void>;
 
 	barcode(data: string, options: BarcodeOptions): Promise<void>;
+
+	getUSBDevices(): Promise<USBDevice[]>;
+
+	connectToUSBDevice(vendorId: number, productId: number): Promise<void>;
 
 	// Error codes
 	BLUETOOTH_NOT_AVAILABLE: string;

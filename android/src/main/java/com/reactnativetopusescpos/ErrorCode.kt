@@ -8,6 +8,7 @@ public enum class ErrorCode(val code: String) {
 	ALREADY_DISCOVERING_BLUETOOTH_DEVICES("already-discovering-bluetooth-devices"),
 	CANNOT_DISCOVER_WHILE_CONNECTED("cannot-discover-while-connected"),
 	PERMISSION_REQUIRED("permission-required"),
+	PERMISSION_DENIED("permission-denied"),
 	DEVICE_NOT_FOUND("device-not-found"),
 	DEVICE_NOT_PAIRED("device-not-paired"),
 	NOT_CONNECTED("not-connected"),

@@ -20,6 +20,7 @@ import {
 	BarcodeType,
 	CharCode,
 	ColorMode,
+	USBDevice,
 } from "react-native-topus-escpos";
 
 type State = {
@@ -32,6 +33,8 @@ type State = {
 
 	isFindingDevices: boolean;
 	foundDevices: BluetoothDevice[];
+
+	usbDevices: USBDevice[];
 };
 
 export default class App extends React.Component<{}, State> {
@@ -44,6 +47,8 @@ export default class App extends React.Component<{}, State> {
 		isFindingDevices: false,
 		isConnecting: false,
 		foundDevices: [],
+
+		usbDevices: [],
 	};
 
 	public render() {
@@ -76,6 +81,27 @@ export default class App extends React.Component<{}, State> {
 
 				<Text>Write state: {this.state.writeState}</Text>
 
+				<Text>USB Devices:</Text>
+				{this.state.usbDevices.map((device) => {
+					return (
+						<View>
+							<Text>
+								{device.name} - {device.id} - {device.productId} -{" "}
+								{device.productName} - {device.manufacturerName}
+							</Text>
+							<Button
+								title="connect"
+								onPress={() =>
+									TopusEscpos.connectToUSBDevice(
+										device.vendorId,
+										device.productId
+									)
+								}
+							/>
+						</View>
+					);
+				})}
+
 				{this.state.foundDevices.map((device) => {
 					return (
 						<Text key={device.address}>
@@ -85,6 +111,7 @@ export default class App extends React.Component<{}, State> {
 				})}
 
 				<Button title="Discover" onPress={() => this.findDevices()} />
+				<Button title="Discover USB" onPress={() => this.findUSBDevices()} />
 
 				<Button
 					title="Set character table"
@@ -266,5 +293,11 @@ export default class App extends React.Component<{}, State> {
 		if (this.disconnectedEventListener) {
 			this.disconnectedEventListener.remove();
 		}
+	}
+
+	private findUSBDevices() {
+		TopusEscpos.getUSBDevices().then((devices) => {
+			this.setState({ usbDevices: devices });
+		});
 	}
 }
